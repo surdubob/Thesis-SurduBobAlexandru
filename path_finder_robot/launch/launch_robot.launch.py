@@ -46,6 +46,12 @@ def generate_launch_description():
     robot_description = Command(['ros2 param get --hide-type /robot_state_publisher robot_description'])
     controller_params_file = os.path.join(get_package_share_directory(pkg_name), 'config', 'my_controllers.yaml')
 
+    arduino_http_comms = Node(
+        package='path_finder_robot',
+        executable='arduino_http_comms.py',
+        output='screen'
+    )
+
     controller_manager = Node(
         package='controller_manager',
         executable='ros2_control_node',
@@ -85,6 +91,7 @@ def generate_launch_description():
     # Run the node
     return LaunchDescription([
         rsp,
+        arduino_http_comms,
         delayed_controller_manager,
         delayed_diffdrive_spawner,
         delayed_joint_broad_spawner

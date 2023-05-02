@@ -31,7 +31,7 @@ install(DIRECTORY launch rviz src urdf meshes config
 )
 
 install(PROGRAMS
-  scripts/motor_controller_node.py
+  scripts/arduino_http_comms.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
