@@ -2,14 +2,14 @@
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import CompressedImage
+from sensor_msgs.msg import CompressedImage, Image
 
 import numpy as np
 import cv2 as cv
 from cv_bridge import CvBridge
 import torch
 
-debug = True
+debug = False
 
 def detectx (frame, model):
     frame = [frame]
@@ -60,6 +60,10 @@ class ObjectDetectionNode(Node):
         self.camera_subscription
         self.br = CvBridge()
         self.running = True
+
+        self.processed_publisher = self.create_publisher(CompressedImage,
+                                                         '/mushroom_detection_image/compressed',
+                                                         10)
         if debug:
             cv.namedWindow('Detections')
             cv.startWindowThread()
@@ -74,6 +78,12 @@ class ObjectDetectionNode(Node):
         results = detectx(image, model=self.model)
         image = cv.cvtColor(image, cv.COLOR_RGB2BGR)
         image = plot_boxes(results, image, classes=self.classes)
+        
+        pbls = CompressedImage()
+        pbls.format = "jpeg"
+        pbls.data = cv.imencode('.jpg', image)[1].tobytes()
+        
+        self.processed_publisher.publish(pbls)
         if debug:
             cv.imshow('Detections', image)
             if cv.waitKey(1) & 0xFF == ord('q'):
