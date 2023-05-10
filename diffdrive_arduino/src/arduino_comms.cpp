@@ -5,7 +5,7 @@
 #include <cstdlib>
 
 
-void ArduinoComms::setup(const std::string &serial_device, int32_t baud_rate, int32_t timeout_ms)
+void ArduinoComms::setup()
 {  
     /*serial_conn_.setPort(serial_device);
     serial_conn_.setBaudrate(baud_rate);

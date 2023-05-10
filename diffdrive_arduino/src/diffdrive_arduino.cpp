@@ -38,7 +38,7 @@ CallbackReturn DiffDriveArduino::on_init(const hardware_interface::HardwareInfo 
   r_wheel_.setup(cfg_.right_wheel_name, cfg_.enc_counts_per_rev);
 
   // Set up the Arduino
-  arduino_.setup(cfg_.device, cfg_.baud_rate, cfg_.timeout);  
+  arduino_.setup();  
 
   RCLCPP_INFO(logger_, "Finished Configuration");
 

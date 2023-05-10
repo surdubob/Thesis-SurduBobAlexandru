@@ -2,5 +2,15 @@
     "files.associations": {
         "*.tcc": "cpp",
         "new": "cpp"
-    }
+    },
+    "python.autoComplete.extraPaths": [
+        "/home/alex/ros2_ws/install/realsense2_camera_msgs/local/lib/python3.10/dist-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/alex/ros2_ws/install/realsense2_camera_msgs/local/lib/python3.10/dist-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ]
 }
