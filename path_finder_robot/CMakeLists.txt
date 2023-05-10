@@ -26,12 +26,13 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-install(DIRECTORY launch rviz src urdf meshes config
+install(DIRECTORY launch rviz src urdf meshes config yolov5-deploy
   DESTINATION share/${PROJECT_NAME}
 )
 
 install(PROGRAMS
   scripts/arduino_http_comms.py
+  scripts/decision_making_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
