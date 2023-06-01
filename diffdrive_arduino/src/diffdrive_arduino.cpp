@@ -14,11 +14,11 @@ DiffDriveArduino::DiffDriveArduino()
     : logger_(rclcpp::get_logger("DiffDriveArduino"))
 {}
 
-CallbackReturn DiffDriveArduino::on_init(const hardware_interface::HardwareInfo & info)
+return_type DiffDriveArduino::configure(const hardware_interface::HardwareInfo & info)
 {
-  if (hardware_interface::SystemInterface::on_init(info) != CallbackReturn::SUCCESS)
+  if (configure_default(info) != return_type::OK)
 {
-  return CallbackReturn::ERROR;
+  return return_type::ERROR;
 }
 
   RCLCPP_INFO(logger_, "Configuring...");
@@ -42,7 +42,7 @@ CallbackReturn DiffDriveArduino::on_init(const hardware_interface::HardwareInfo 
 
   RCLCPP_INFO(logger_, "Finished Configuration");
 
-  return CallbackReturn::SUCCESS;
+  return return_type::OK;
 }
 
 std::vector<hardware_interface::StateInterface> DiffDriveArduino::export_state_interfaces()
@@ -72,7 +72,7 @@ std::vector<hardware_interface::CommandInterface> DiffDriveArduino::export_comma
 }
 
 
-CallbackReturn DiffDriveArduino::on_activate(const rclcpp_lifecycle::State & /* previous_state */)
+return_type DiffDriveArduino::start()
 {
   RCLCPP_INFO(logger_, "Starting Controller...");
   arduino_.sendEmptyMsg();
@@ -80,17 +80,17 @@ CallbackReturn DiffDriveArduino::on_activate(const rclcpp_lifecycle::State & /* 
   // arduino.setPidValues(14,7,0,100);
   arduino_.setPidValues(30, 20, 0, 100);
 
-  return CallbackReturn::SUCCESS;
+  return return_type::OK;
 }
 
-CallbackReturn DiffDriveArduino::on_deactivate(const rclcpp_lifecycle::State & /* previous_state */)
+return_type DiffDriveArduino::stop()
 {
   RCLCPP_INFO(logger_, "Stopping Controller...");
 
-  return CallbackReturn::SUCCESS;
+  return return_type::OK;
 }
 
-return_type DiffDriveArduino::read(const rclcpp::Time & /* time */, const rclcpp::Duration & /* period */)
+return_type DiffDriveArduino::read()
 {
 
   // TODO fix chrono duration
@@ -124,7 +124,7 @@ return_type DiffDriveArduino::read(const rclcpp::Time & /* time */, const rclcpp
   
 }
 
-return_type DiffDriveArduino::write(const rclcpp::Time & /* time */, const rclcpp::Duration & /* period */)
+return_type DiffDriveArduino::write()
 {
 
   if (!arduino_.connected())
