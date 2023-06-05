@@ -5,7 +5,7 @@ twist_mux:
         topic: cmd_vel
         timeout: 0.5
         priority: 10
-      keyboard:
+      decision_making:
         topic: cmd_vel_decision_making
         timeout: 0.5
         priority: 20
