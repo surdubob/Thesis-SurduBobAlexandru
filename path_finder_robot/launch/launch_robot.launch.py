@@ -63,7 +63,7 @@ def generate_launch_description():
 
     diff_drive_spawner = Node(
         package='controller_manager',
-        executable='spawner',
+        executable='spawner.py',
         arguments=["diff_cont"]
     )
 
@@ -76,7 +76,7 @@ def generate_launch_description():
 
     joint_broad_spawner = Node(
         package="controller_manager",
-        executable="spawner",
+        executable="spawner.py",
         arguments=["joint_broad"]
     )
 
@@ -86,6 +86,15 @@ def generate_launch_description():
             on_start=[joint_broad_spawner]
         )
     )
+    twist_mux = Node(
+        package='twist_mux',
+        executable='twist_mux',
+        output='screen',
+        parameters=['--params-file', '/home/alex/ros2_ws/src/path_finder_robot/config/twist_mux.yaml'],
+        remappings=[
+            ("cmd_vel_out", "diff_cont/cmd_vel_unstamped")
+        ]
+    )
 
 
     # Run the node
@@ -94,5 +103,6 @@ def generate_launch_description():
         arduino_http_comms,
         delayed_controller_manager,
         delayed_diffdrive_spawner,
-        delayed_joint_broad_spawner
+        delayed_joint_broad_spawner,
+        twist_mux
     ])
