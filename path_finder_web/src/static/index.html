@@ -12,83 +12,221 @@
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha2/dist/js/bootstrap.bundle.min.js" integrity="sha384-qKXV1j0HvMUeCBQ+QVp7JcfGl760yU08IQ+GpUo5hlbpg51QRiuqHAJz8+BrxE/N" crossorigin="anonymous"></script>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.min.css" rel="stylesheet">
         <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.3/jquery.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.2/socket.io.min.js" integrity="sha512-mUWPbwx6PZatai4i3+gevCw6LeuQxcMgnJs/DZij22MZ4JMpqKaEvMq0N9TTArSWEb5sdQ9xH68HMUc30eNPEA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
         <script>
+			var lastMap = null;
+			var lastPose = {pose: {pose: {position:{x: 0, y: 0}}}};
 
-			function move(argument)
-			{
-				$.get('/movement-command/' + argument, function (data, status) {
-                    console.log(data);
-                });
+			var lastObjects = null;
+			var mapScale = 3.0;
+			var highlightedObject = null;
+
+			const socket = io.connect('/');
+
+			function drawMap() {
+				const canvas = document.getElementById("map");
+				const ctx = canvas.getContext("2d");
+				if(lastMap != null && lastMap != ''){
+					ctx.canvas.width  = lastMap.info.height * mapScale;
+					ctx.canvas.height = lastMap.info.width * mapScale;
+
+					ctx.fillStyle = "#CCCCCC";
+					ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+					for(var i = 0; i < lastMap.info.height; i++) {
+						for(var j = 0; j < lastMap.info.width; j++) {
+							ctx.fillStyle = "#000000";
+							var val = lastMap.data[i * lastMap.info.width + j];
+							if(val > 0) {
+								ctx.fillRect(mapScale * i, mapScale * j, mapScale, mapScale);
+							}
+						}
+					}
+					
+					if(lastPose != null && lastPose != '') {
+						ctx.fillStyle = "#FF0000";
+						var i = (lastPose.pose.pose.position.x - lastMap.info.origin.position.x) / lastMap.info.resolution * mapScale
+						var j = (lastPose.pose.pose.position.y - lastMap.info.origin.position.y) / lastMap.info.resolution * mapScale
+						// ctx.fillRect(j, i,2.5 * mapScale, 2.5 * mapScale);
+
+						var robotEuler = eulerFromQuat([lastPose.pose.pose.orientation.x,
+							lastPose.pose.pose.orientation.y,
+							lastPose.pose.pose.orientation.z,
+							lastPose.pose.pose.orientation.w
+						])
+
+						ctx.translate(j, i);
+						ctx.rotate(-robotEuler[0])
+						ctx.translate(-j, -i);
+						drawArrow(ctx, j, i, j, i + 20, 3, 'red');
+						ctx.resetTransform();
+					}
+					
+					if(lastObjects != null && lastObjects != '') {
+						lastObjects.markers.forEach((element, index) => {
+							var i = (element.pose.position.x - lastMap.info.origin.position.x) / lastMap.info.resolution * mapScale;
+							var j = (element.pose.position.y - lastMap.info.origin.position.y) / lastMap.info.resolution * mapScale;
+
+							if(highlightedObject == null){
+								ctx.fillStyle = "#00AA00";
+								ctx.fillRect(j, i, 3*mapScale, 3*mapScale);
+							} else {
+								if(index == highlightedObject){
+									ctx.fillStyle = "#AA0000";
+									ctx.fillRect(j - (mapScale / 2), i - (mapScale / 2), 4*mapScale, 4*mapScale);
+								}
+							}
+						});
+					}
+				}
 			}
 
-            var map = {}; // You could also use an array
-			onkeydown = onkeyup = function(e){
-				e = e || event; // to deal with IE
-				map[e.keyCode] = e.type == 'keydown';
-				/* insert conditional here */
-				if(map[38])
-				{
-					if(map[39])
-					{
-						move('diag_right');
-					}
-					else if(map[37])
-					{
-						move('diag_left');
-					}
-					else
-					{
-						move('forward');
-					}
-				}
-				else if(map[40])
-				{
-					if(map[39])
-					{
-						move('diag_back_right');
-					}
-					else if(map[37])
-					{
-						move('diag_back_left');
-					}
-					else
-					{
-						move('backward');
-					}
-				}
-				else if(map[37])
-				{
-					move('left');
-				}
-				else if(map[39])
-				{
-					move('right');
-				}
-				else if(e.keyCode != 0)
-				{
-					move('stop');
-				}
+			function eulerFromQuat(quat) {
+
+				const q0 = quat[0];
+				const q1 = quat[1];
+				const q2 = quat[2];
+				const q3 = quat[3];
+
+				const Rx = Math.atan2(2 * (q0 * q1 + q2 * q3), 1 - (2 * (q1 * q1 + q2 * q2)));
+				const Ry = Math.asin(2 * (q0 * q2 - q3 * q1));
+				const Rz = Math.atan2(2 * (q0 * q3 + q1 * q2), 1 - (2  * (q2 * q2 + q3 * q3)));
+
+				const euler = [Rx, Ry, Rz];
+
+				return(euler);
 			}
+
+			function drawArrow(ctx, fromx, fromy, tox, toy, arrowWidth, color){
+				//variables to be used when creating the arrow
+				var headlen = 10;
+				var angle = Math.atan2(toy-fromy,tox-fromx);
+			
+				ctx.save();
+				ctx.strokeStyle = color;
+			
+				//starting path of the arrow from the start square to the end square
+				//and drawing the stroke
+				ctx.beginPath();
+				ctx.moveTo(fromx, fromy);
+				ctx.lineTo(tox, toy);
+				ctx.lineWidth = arrowWidth;
+				ctx.stroke();
+			
+				//starting a new path from the head of the arrow to one of the sides of
+				//the point
+				ctx.beginPath();
+				ctx.moveTo(tox, toy);
+				ctx.lineTo(tox-headlen*Math.cos(angle-Math.PI/7),
+						toy-headlen*Math.sin(angle-Math.PI/7));
+			
+				//path from the side point of the arrow, to the other side point
+				ctx.lineTo(tox-headlen*Math.cos(angle+Math.PI/7),
+						toy-headlen*Math.sin(angle+Math.PI/7));
+			
+				//path from the side point back to the tip of the arrow, and then
+				//again to the opposite side point
+				ctx.lineTo(tox, toy);
+				ctx.lineTo(tox-headlen*Math.cos(angle-Math.PI/7),
+						toy-headlen*Math.sin(angle-Math.PI/7));
+			
+				//draws the paths created above
+				ctx.stroke();
+				ctx.restore();
+			}
+
+			function updatemap() {
+				$.get('/get_map', function(msg) {
+					// console.log(msg);
+					lastMap = msg;
+					
+				});
+			}
+
+			function highlightObject(objId) {
+				highlightedObject = objId;
+			}
+
+			function unhighlightObject(objId) {
+				highlightedObject = null;
+			}
+
+			function updatePose() {
+				$.get('/get_pose', function(msg) {
+					lastPose = msg;
+				});
+				$.get('/get_objects', function(msg) {
+					lastObjects = msg;
+					var innerHtml = "";
+					var detectedObjectsList = $('#object-list');
+					if(lastObjects != null && lastObjects != '') {
+						lastObjects.markers.forEach((element, index) => {
+						innerHtml += `<li id="${'detected-object-' + index}" onmouseover="highlightObject(${index})" onmouseout="unhighlightObject(${index})" class="list-group-item">${element.text + ' ' + (index + 1) + 
+							'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;coord: (' + element.pose.position.x + ', ' + element.pose.position.y + ')'}</li>`;
+						});
+						detectedObjectsList.html(innerHtml);
+					}
+				});
+			}
+
+			function init() {
+				console.log('initializing');
+				var intervalId = setInterval(updatemap, 3000);
+				var intervalId2 = setInterval(updatePose, 1000);
+				var intervalId3 = setInterval(drawMap, 100);
+				
+				$('#map').click((e) => {
+					var mouseX = e.pageX - $("#map").offset().left;
+    				var mouseY = e.pageY - $("#map").offset().top;
+					console.log(mouseX + ' ' + mouseY)
+					var ics = (mouseX / 2 * lastMap.info.resolution) + lastMap.info.origin.position.y
+					var igrec = (mouseY / 2 * lastMap.info.resolution) + lastMap.info.origin.position.x
+					console.log(ics, igrec)
+				})
+
+				$("#scale_slider").on("change",function(){
+					mapScale = $(this).val();
+				});
+				var enc = new TextDecoder("utf-8");
+				socket.on('image', (image) => {
+					const img = document.getElementById('image-stream');
+					img.src = `data:image/jpeg;base64,${btoa(String.fromCharCode(...new Uint8Array(image.data)))}`
+				})
+			}
+
         </script>
 
     </head>
-    <body>
-        <div class="container mt-4">
-            <div class="row my-2">
-                <div class="col-1"></div>
-                <button class="btn btn-primary col-3"><i class="bi bi-arrow-up"></i></button>
-            </div>
-            <div class="row my-2">
-                <button class="btn btn-primary col-2"><i class="bi bi-arrow-left"></i></button>
-                <div class="col-1"></div>
-                <button class="btn btn-primary col-2"><i class="bi bi-arrow-right"></i></button>
-            </div>
-            <div class="row my-2">
-                <div class="col-1"></div>
-                <button class="btn btn-primary col-3"><i class="bi bi-arrow-down"></i></button>
-            </div>
-        </div>
-
-    </body>
+    <body onload="init()" style="background-color: #e6f3ff;">
+		<nav class="navbar navbar-expand-sm bg-dark navbar-dark">
+			<div class="container-fluid">
+			  <span class="navbar-brand">Robot Control Panel</span>
+			</div>
+		</nav>
+		<div class="container-fluid p-4">
+			<div class="row">
+				<div class="col-md-6 col-lg-7 col-xl-8">
+					<div style="overflow: auto; max-width: 100%;">
+						<canvas id="map" width="300" height="300" style="border:1px solid grey;"></canvas>
+					</div>
+					<div>
+						<label for="scale_slider">Map scale:</label>
+						<input type="range" min="0.5" max="8" value="2" step="0.2" id="scale_slider"/>
+					</div>
+				</div>
+				<div class="col-md-6 col-lg-5 col-xl-4">
+					<img id="image-stream" class="w-100">
+				</div>
+			</div>
+			<hr class="mt-4 mb-2">
+			<div class="row">
+				<div class="col-xl-3 col-lg-4 col-md-6">
+					<h3>Detected objects:</h3>
+					<ul id="object-list" class="list-group">
+					</ul>
+				</div>
+			</div>			
+		</div>
+	</body>
 </html>

@@ -26,7 +26,12 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-install(DIRECTORY launch rviz src urdf meshes config yolov5-deploy
+find_package(rosidl_default_generators REQUIRED)
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "srv/ChangeState.srv"
+)
+
+install(DIRECTORY launch rviz src srv urdf meshes config yolov5-deploy
   DESTINATION share/${PROJECT_NAME}
 )
 

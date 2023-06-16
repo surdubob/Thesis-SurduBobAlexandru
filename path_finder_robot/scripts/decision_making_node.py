@@ -4,7 +4,8 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import String
-from geometry_msgs.msg import Twist 
+from geometry_msgs.msg import Twist, Pose
+from visualization_msgs.msg import Marker, MarkerArray
 
 import time
 
@@ -16,6 +17,8 @@ from scipy.interpolate import interp1d
 from enum import Enum
 import math
 import os
+
+from path_finder_robot.srv import ChangeState
 
 from threading import Timer, Thread
 
@@ -39,7 +42,7 @@ class ObjectDetectionNode(Node):
             self.camera_frame_received,
             10)
         
-        self.decision_making_state = RobotState.APPROACHING
+        self.decision_making_state = RobotState.NAVIGATION
 
         self.camera_subscription
         self.camera_distance_calibration_x = [10, 23, 47, 81, 92, 132, 170, 200, 250, 270, 320, 370, 350] # pixels for realsense
@@ -58,11 +61,12 @@ class ObjectDetectionNode(Node):
         self.last_results = None
 
         self.processed_publisher = self.create_publisher(CompressedImage,
-                                                         '/mushroom_detection_image/compressed',
+                                                         '/object_detection_image/compressed',
                                                          10)
         
         self.motor_command_publisher = self.create_publisher(String, '/arduino_raw_commands', 10)
         self.cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel_decision_making', 10)
+        self.object_publisher = self.create_publisher(MarkerArray, '/detected_object_markers', 10)
         
         time.sleep(0.5)
         self.release_mushroom()
@@ -72,6 +76,8 @@ class ObjectDetectionNode(Node):
             cv.startWindowThread()
 
         self.model =  torch.hub.load('install/path_finder_robot/share/path_finder_robot/yolov5-deploy/yolov5', 'custom', source ='local', path='install/path_finder_robot/share/path_finder_robot/yolov5-deploy//mushroom.pt',force_reload=True) ### The repo is stored locally
+
+        self.srv = self.create_service(ChangeState, 'change_state', self.change_decision_making_state)
 
         self.decision_making_thread = Thread(target=self.decision_making_function)
         self.decision_making_thread.daemon = True
@@ -177,6 +183,8 @@ class ObjectDetectionNode(Node):
         n = len(labels)
         x_shape, y_shape = frame.shape[1], frame.shape[0]
 
+        object_list_message = MarkerArray()
+
         ### looping through the detections
         for i in range(n):
             row = cord[i]
@@ -211,13 +219,43 @@ class ObjectDetectionNode(Node):
                         cv.putText(frame, 'Dist ' + str(dist) + ' cm', (x1, y1), cv.FONT_HERSHEY_SIMPLEX, 0.7,(255,255,255), 2)
                         self.last_mushroom_center = center
                         self.detected_once = True
+                        object_list_message.markers.append(self.create_marker_for_object())
                     self.last_mushroom_dist = dist
 
                 # if debug:
                 #     print(text_d + f" {round(float(row[4]),2)}")
+        # print(object_list_message)
+        self.object_publisher.publish(object_list_message)
 
         return frame
         
+    def create_marker_for_object(self, coords=None, name="Mushroom"):
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.type = 8
+        marker.id = 0
+        marker.scale.x = 1.0
+        marker.scale.y = 1.0
+        marker.scale.z = 1.0
+        marker.text = name
+
+        # Set the color
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        marker.color.b = 0.0
+        marker.color.a = 1.0
+
+        marker.pose = Pose()
+        # Set the pose of the marker
+        marker.pose.position.x = 1.0
+        marker.pose.position.y = 0.0
+        marker.pose.position.z = 0.0
+        marker.pose.orientation.x = 0.0
+        marker.pose.orientation.y = 0.0
+        marker.pose.orientation.z = 0.0
+        marker.pose.orientation.w = 1.0
+
+        return marker
 
     def send_string_message(self, string_message):
         str_msg = String()
@@ -247,6 +285,11 @@ class ObjectDetectionNode(Node):
     def stop_robot(self):
         print('stopping')
         self.move_command(0.0, 0.0, 0.0)
+
+    def change_decision_making_state(self, request, response):
+        print('I was called with: ' + request.state_name)
+        response.response_data = request.state_name
+        return response
 
 
 def main(args=None):
