@@ -27,9 +27,17 @@ rclnodejs.init().then(() => {
     last_map = msg;
   });
 
-  ros_node.createSubscription('geometry_msgs/msg/PoseWithCovarianceStamped', '/pose', (msg) => {
+  // ros_node.createSubscription('geometry_msgs/msg/PoseWithCovarianceStamped', '/pose', (msg) => {
+  //   // console.log(`Received message: ${typeof msg}`, msg);
+  //   last_pose = msg;
+  // });
+  ros_node.createSubscription('tf2_msgs/msg/TFMessage', '/tf', (msg) => {
     // console.log(`Received message: ${typeof msg}`, msg);
-    last_pose = msg;
+    msg.transforms.forEach(tr => {
+      if (tr.header.frame_id == 'odom' && tr.child_frame_id == 'base_link'){
+        last_pose = {pose: {pose: {position: tr.transform.translation, orientation: tr.transform.rotation}}}
+      }
+    });
   });
 
   ros_node.createSubscription('sensor_msgs/msg/CompressedImage', '/object_detection_image/compressed', (msg) => {
@@ -47,6 +55,9 @@ rclnodejs.init().then(() => {
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'static/index.html'));
+});
+app.get('/icon', (req, res) => {
+  res.sendFile(path.join(__dirname, 'static/icon.png'));
 });
 
 app.get('/get_map', (req, res) => {

@@ -2,9 +2,11 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import String
-from geometry_msgs.msg import Twist, Pose
+from geometry_msgs.msg import Twist, PoseWithCovarianceStamped, Pose, Point
+from tf2_msgs.msg import TFMessage
 from visualization_msgs.msg import Marker, MarkerArray
 
 import time
@@ -42,6 +44,14 @@ class ObjectDetectionNode(Node):
             self.camera_frame_received,
             10)
         
+        qos_sensor = QoSProfile(
+            reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT,
+            history=QoSHistoryPolicy.RMW_QOS_POLICY_HISTORY_KEEP_LAST,
+            depth=1
+        )
+        # self.pose_subscription = self.create_subscription(PoseWithCovarianceStamped, '/pose', self.pose_received, qos_sensor)
+        self.tf_subscription = self.create_subscription(TFMessage, '/tf', self.tf_received, 10)
+        
         self.decision_making_state = RobotState.NAVIGATION
 
         self.camera_subscription
@@ -59,6 +69,7 @@ class ObjectDetectionNode(Node):
         self.last_bad_angle_time = 0
         self.detected_once = False
         self.last_results = None
+        self.last_pose = None
 
         self.processed_publisher = self.create_publisher(CompressedImage,
                                                          '/object_detection_image/compressed',
@@ -219,7 +230,7 @@ class ObjectDetectionNode(Node):
                         cv.putText(frame, 'Dist ' + str(dist) + ' cm', (x1, y1), cv.FONT_HERSHEY_SIMPLEX, 0.7,(255,255,255), 2)
                         self.last_mushroom_center = center
                         self.detected_once = True
-                        object_list_message.markers.append(self.create_marker_for_object())
+                        object_list_message.markers.append(self.create_marker_for_object(self.calculate_coordinates_of_detected_object(center, dist)))
                     self.last_mushroom_dist = dist
 
                 # if debug:
@@ -247,15 +258,52 @@ class ObjectDetectionNode(Node):
 
         marker.pose = Pose()
         # Set the pose of the marker
-        marker.pose.position.x = 1.0
-        marker.pose.position.y = 0.0
-        marker.pose.position.z = 0.0
+        marker.pose.position.x = coords.x if coords != None else 0.0
+        marker.pose.position.y = coords.y if coords != None else 0.0
+        marker.pose.position.z = coords.z if coords != None else 0.0
         marker.pose.orientation.x = 0.0
         marker.pose.orientation.y = 0.0
         marker.pose.orientation.z = 0.0
         marker.pose.orientation.w = 1.0
 
         return marker
+    
+    def eulerFromQuat(self, quat):
+        q0 = quat.x
+        q1 = quat.y
+        q2 = quat.z
+        q3 = quat.w
+
+        Rx = math.atan2(2 * (q0 * q1 + q2 * q3), 1 - (2 * (q1 * q1 + q2 * q2)))
+        Ry = math.asin(2 * (q0 * q2 - q3 * q1))
+        Rz = math.atan2(2 * (q0 * q3 + q1 * q2), 1 - (2  * (q2 * q2 + q3 * q3)))
+
+        euler = [Rx, Ry, Rz]
+
+        return euler
+			
+
+    def calculate_coordinates_of_detected_object(self, object_center, distance):
+        object_point = Point()
+        if self.last_pose:
+            # robot_angles = self.eulerFromQuat(self.last_pose.orientation)
+            robot_angles = self.eulerFromQuat(self.last_pose.rotation)
+            # print(math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
+            # object_point.x = self.last_pose.position.x + distance / 100 * math.cos(robot_angles[0] + math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
+            # object_point.y = self.last_pose.position.y + distance / 100 * math.sin(robot_angles[0] + math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
+            object_point.x = self.last_pose.translation.x + distance / 100 * math.cos(robot_angles[0] + math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
+            object_point.y = self.last_pose.translation.y + distance / 100 * math.sin(robot_angles[0] + math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
+            object_point.z = 0.0
+            return object_point
+        return None
+    
+
+    def tf_received(self, msg):
+        for tr in msg.transforms:
+            if tr.header.frame_id == 'odom' and tr.child_frame_id == 'base_link':
+                self.last_pose = tr.transform
+
+        
 
     def send_string_message(self, string_message):
         str_msg = String()
