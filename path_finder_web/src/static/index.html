@@ -152,6 +152,20 @@
 				highlightedObject = null;
 			}
 
+			function pick_object(objId) {
+				// $.post('/pick_object', {object_id: objId}, resp => {
+				// 	console.log(resp);
+				// });
+				$.ajax({
+					type: 'POST',
+					url: '/pick_object',
+					data: `{"object_id": "${objId}"}`, // or JSON.stringify ({name: 'jonas'}),
+					success: function(data) { console.log('data: ' + data); },
+					contentType: "application/json",
+					dataType: 'json'
+				});
+			}
+
 			function updatePose() {
 				$.get('/get_pose', function(msg) {
 					lastPose = msg;
@@ -163,7 +177,7 @@
 					var detectedObjectsList = $('#object-list');
 					if(lastObjects != null && lastObjects != '') {
 						lastObjects.markers.forEach((element, index) => {
-						innerHtml += `<li id="${'detected-object-' + index}" onmouseover="highlightObject(${index})" onmouseout="unhighlightObject(${index})" class="list-group-item">${element.text + ' ' + (index + 1) + 
+						innerHtml += `<li id="${'detected-object-' + index}" onclick="pick_object(${index})" onmouseover="highlightObject(${index})" onmouseout="unhighlightObject(${index})" class="list-group-item">${element.text + ' ' + (index + 1) + 
 							'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;coord: (' + Math.round(element.pose.position.x * 100) / 100 + ', ' + Math.round(element.pose.position.y * 100) / 100 + ')'}</li>`;
 						});
 						detectedObjectsList.html(innerHtml);
@@ -229,21 +243,65 @@
 				}
 				
 				return base64
-				}
+			}
+
+			function publishGoal(coords) {
+				$.ajax({
+					type: 'POST',
+					url: '/publish_goal_pose',
+					data: `{"x": "${coords.x}", "y": "${coords.y}", "unghi": "${coords.unghi}"}`,
+					success: function(data) { console.log('data: ' + data); },
+					contentType: "application/json",
+					dataType: 'json'
+				});
+			}
+
+			function getAngle(coord, poseInPixels) {
+				var dx = coord.x - poseInPixels.x;
+				var dy = -(coord.y - poseInPixels.y);
+
+				var inRads = Math.atan2(dy, dx) + (Math.PI / 2);
+
+				if (inRads < 0)
+					inRads = Math.abs(inRads);
+				else
+					inRads = 2 * Math.PI - inRads;
+				
+				inRads = 2 * Math.PI - inRads
+
+				if(inRads > Math.PI)
+					inRads = inRads - 2 * Math.PI
+
+				return inRads
+			}
+
+			function releaseObject() {
+				$.get('/release_object', function(resp) {
+					console.log('Released object')
+				});
+			}
 
 			function init() {
 				console.log('initializing');
 				var intervalId = setInterval(updatemap, 3000);
-				var intervalId2 = setInterval(updatePose, 1000);
+				var intervalId2 = setInterval(updatePose, 200);
 				var intervalId3 = setInterval(drawMap, 100);
 				
 				$('#map').click((e) => {
 					var mouseX = e.pageX - $("#map").offset().left;
     				var mouseY = e.pageY - $("#map").offset().top;
-					console.log(mouseX + ' ' + mouseY)
-					var ics = (mouseX / 2 * lastMap.info.resolution) + lastMap.info.origin.position.y
-					var igrec = (mouseY / 2 * lastMap.info.resolution) + lastMap.info.origin.position.x
-					console.log(ics, igrec)
+					console.log(mouseX + ' ' + mouseY);
+					var igrec = (mouseX / mapScale * lastMap.info.resolution) + lastMap.info.origin.position.y;
+					var ics = (mouseY / mapScale * lastMap.info.resolution) + lastMap.info.origin.position.x;
+
+					var robotj = (lastPose.pose.pose.position.x - lastMap.info.origin.position.x) / lastMap.info.resolution * mapScale
+					var roboti = (lastPose.pose.pose.position.y - lastMap.info.origin.position.y) / lastMap.info.resolution * mapScale
+					
+					// console.log(mouseX, mouseY, roboti, robotj)
+
+					var angle = getAngle({x: mouseX, y: mouseY}, {x: roboti, y: robotj});
+
+					publishGoal({x: ics, y: igrec, unghi: angle});
 				})
 
 				$("#scale_slider").on("change",function(){
@@ -294,7 +352,8 @@
 				</div>
 				<div class="col-lg-3 col-xl-5 d-none d-md-block mx-auto"></div>
 				<div class="col-md-6 col-lg-5 col-xl-4 mt-4 mx-auto">
-					<h5>Arm status: no object in hand</h4>
+					<h5>Arm control: <button class="btn btn-primary" onclick="releaseObject()">Release object</button></h5>
+					
 				</div>
 			</div>			
 		</div>

@@ -5,9 +5,15 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import String
-from geometry_msgs.msg import Twist, PoseWithCovarianceStamped, Pose, Point
+from geometry_msgs.msg import Twist, PoseWithCovarianceStamped, Pose, Point, PoseStamped
 from tf2_msgs.msg import TFMessage
 from visualization_msgs.msg import Marker, MarkerArray
+from tf2_ros.transform_listener import TransformListener
+from tf2_ros.buffer import Buffer
+from tf2_ros import LookupException
+from action_msgs.srv import CancelGoal
+from rclpy.action import ActionClient
+from nav2_msgs.action import NavigateToPose
 
 import time
 
@@ -28,10 +34,11 @@ debug = False
 
 class RobotState(Enum):
     NAVIGATION = 1
-    APPROACHING = 2
-    CLOSE = 3
-    GRABBING = 4
-    GRABBED = 5
+    FINDING = 2
+    APPROACHING = 3
+    CLOSE = 4
+    GRABBING = 5
+    GRABBED = 6
 
 
 class ObjectDetectionNode(Node):
@@ -44,14 +51,17 @@ class ObjectDetectionNode(Node):
             self.camera_frame_received,
             10)
         
-        qos_sensor = QoSProfile(
-            reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT,
-            history=QoSHistoryPolicy.RMW_QOS_POLICY_HISTORY_KEEP_LAST,
-            depth=1
-        )
+        # qos_sensor = QoSProfile(
+        #     reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT,
+        #     history=QoSHistoryPolicy.RMW_QOS_POLICY_HISTORY_KEEP_LAST,
+        #     depth=1
+        # )
         # self.pose_subscription = self.create_subscription(PoseWithCovarianceStamped, '/pose', self.pose_received, qos_sensor)
         self.tf_subscription = self.create_subscription(TFMessage, '/tf', self.tf_received, 10)
         
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
+
         self.decision_making_state = RobotState.NAVIGATION
 
         self.camera_subscription
@@ -70,6 +80,9 @@ class ObjectDetectionNode(Node):
         self.detected_once = False
         self.last_results = None
         self.last_pose = None
+        self.objects_array = []
+        self.pick_object_index = None
+        self.last_navigation_command = 0
 
         self.processed_publisher = self.create_publisher(CompressedImage,
                                                          '/object_detection_image/compressed',
@@ -78,7 +91,11 @@ class ObjectDetectionNode(Node):
         self.motor_command_publisher = self.create_publisher(String, '/arduino_raw_commands', 10)
         self.cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel_decision_making', 10)
         self.object_publisher = self.create_publisher(MarkerArray, '/detected_object_markers', 10)
-        
+        self.pose_transform_publisher = self.create_publisher(TFMessage, '/pose_transforms', 10)
+        self.goal_pose_publisher = self.create_publisher(PoseStamped, '/goal_pose', 10)
+        # self.cancel_goal_publisher = self.create_client(CancelGoal, '/', 10)
+        self.action_client = ActionClient(self, NavigateToPose, '/navigate_to_pose')
+
         time.sleep(0.5)
         self.release_mushroom()
         
@@ -132,46 +149,66 @@ class ObjectDetectionNode(Node):
     def decision_making_function(self):
         try:
             while rclpy.ok():
-                if self.last_results is not None:
-                    labels, cord = self.last_results
-                    if self.detected_once:
-                        if self.decision_making_state == RobotState.APPROACHING:
-                            if self.last_mushroom_dist > 40 and len(labels) > 0 and cord[0][4] > 0.7:
-                                angle = self.calculate_control_angular_speed()
-                                self.move_command(0.2, angle * 0.6, speed=0.03)
-                            else:
-                                self.move_command(0.0, 0.0, 0.0)
+                if self.pick_object_index is not None:
+                    # print(self.last_mushroom_center, self.last_mushroom_dist)
+                    if self.last_results is not None:
+                        labels, cord = self.last_results
+                        if self.detected_once:
+                            if self.decision_making_state == RobotState.FINDING:
                                 if len(labels) > 0 and cord[0][4] > 0.7:
-                                    self.decision_making_state = RobotState.CLOSE
-                                    self._logger.info('mushroom is close')
+                                    # self.last_mushroom_dist = self.objects_array[self.pick_object_index][1]
+                                    # self.last_mushroom_center = self.objects_array[self.pick_object_index][2]
+                                    object_coordinates = self.calculate_coordinates_of_detected_object(self.last_mushroom_center, self.last_mushroom_dist)
+                                    print(self.objects_array[self.pick_object_index])
+                                    if object_coordinates is not None:
+                                        if abs(self.objects_array[self.pick_object_index][0].x - object_coordinates.x) < 1 and abs(self.objects_array[self.pick_object_index][0].y - object_coordinates.y) < 1:
+                                            self.decision_making_state = RobotState.APPROACHING
+                                            self.cancelNavigation()
+                                        else:
+                                            self.navigateToPose(object_coordinates)
+                                else:
+                                    self.navigateToPose(self.objects_array[self.pick_object_index][0])
+                            if self.decision_making_state == RobotState.APPROACHING:
+                                if self.last_mushroom_dist > 40 and len(labels) > 0 and cord[0][4] > 0.7:
+                                    angle = self.calculate_control_angular_speed()
+                                    self.move_command(0.2, angle * 0.6, speed=0.03)
+                                else:
+                                    self.move_command(0.0, 0.0, 0.0)
+                                    if len(labels) > 0 and cord[0][4] > 0.7:
+                                        self.decision_making_state = RobotState.CLOSE
+                                        self._logger.info('mushroom is close')
 
-                        if self.decision_making_state == RobotState.CLOSE:
-                            angle = 0 # self.calculate_control_angular_speed()
-                            if self.last_mushroom_center[0] > self.frame_width / 2 + 140:
-                                angle = -1
-                                self.last_bad_angle_time = time.time()
-                            elif self.last_mushroom_center[0] < self.frame_width / 2 + 70:
-                                angle = 1
-                                self.last_bad_angle_time = time.time()
+                            if self.decision_making_state == RobotState.CLOSE:
+                                angle = 0 # self.calculate_control_angular_speed()
+                                if self.last_mushroom_center[0] > self.frame_width / 2 + 140:
+                                    angle = -1
+                                    self.last_bad_angle_time = time.time()
+                                elif self.last_mushroom_center[0] < self.frame_width / 2 + 70:
+                                    angle = 1
+                                    self.last_bad_angle_time = time.time()
 
-                            if angle == 0 and time.time() - self.last_bad_angle_time > 1:
-                                self._logger.info('direction is good')
-                                self.decision_making_state = RobotState.GRABBING
-                            elif angle != 0:
-                                self._logger.info('angle still not ok, angle: ' + str(angle))
-                                self.last_bad_angle_time = time.time()
-                                self.move_command(0.0, angle * 2.0, speed=0.5)
-                                time.sleep(0.6)
-                                self.move_command(0.0, 0.0, speed=0.000)
-                                time.sleep(0.4)
+                                if angle == 0 and time.time() - self.last_bad_angle_time > 1:
+                                    self._logger.info('direction is good')
+                                    self.decision_making_state = RobotState.GRABBING
+                                elif angle != 0:
+                                    self._logger.info('angle still not ok, angle: ' + str(angle))
+                                    self.last_bad_angle_time = time.time()
+                                    self.move_command(0.0, angle * 3.0, speed=0.5)
+                                    time.sleep(0.7)
+                                    self.move_command(0.0, 0.0, speed=0.000)
+                                    time.sleep(0.4)
 
-                        if self.decision_making_state == RobotState.GRABBING:
-                            print(self.last_mushroom_dist)
-                            if self.last_mushroom_dist > 11 and len(labels) > 0 and cord[0][4] > 0.7:
-                                self.move_command(0.1, 0.0, speed=0.005)
-                            elif len(labels) > 0 and cord[0][4] > 0.7:
-                                self.grab_mushroom()
-                                self.decision_making_state = RobotState.GRABBED
+                            if self.decision_making_state == RobotState.GRABBING:
+                                # print(self.last_mushroom_dist)
+                                if self.last_mushroom_dist > 11 and len(labels) > 0 and cord[0][4] > 0.7:
+                                    self.move_command(0.1, 0.0, speed=0.005)
+                                elif len(labels) > 0 and cord[0][4] > 0.7:
+                                    self.grab_mushroom()
+                                    self.decision_making_state = RobotState.GRABBED
+                            if self.decision_making_state == RobotState.GRABBED:
+                                pass
+                else:
+                    self.decision_making_state = RobotState.NAVIGATION
                 time.sleep(0.02)
         except (KeyboardInterrupt, SystemExit):
             exit()
@@ -193,8 +230,6 @@ class ObjectDetectionNode(Node):
         labels, cord = results
         n = len(labels)
         x_shape, y_shape = frame.shape[1], frame.shape[0]
-
-        object_list_message = MarkerArray()
 
         ### looping through the detections
         for i in range(n):
@@ -230,12 +265,26 @@ class ObjectDetectionNode(Node):
                         cv.putText(frame, 'Dist ' + str(dist) + ' cm', (x1, y1), cv.FONT_HERSHEY_SIMPLEX, 0.7,(255,255,255), 2)
                         self.last_mushroom_center = center
                         self.detected_once = True
-                        object_list_message.markers.append(self.create_marker_for_object(self.calculate_coordinates_of_detected_object(center, dist)))
+                        object_coordinates = self.calculate_coordinates_of_detected_object(center, dist)
+                        if object_coordinates:
+                            gasit = False
+                            gasit_index = 0
+                            for ind, obj in enumerate(self.objects_array):
+                                if abs(obj[0].x - object_coordinates.x) < 1 and abs(obj[0].y - object_coordinates.y) < 1:
+                                    gasit = True
+                                    gasit_index = ind
+                            if not gasit and self.decision_making_state == RobotState.NAVIGATION and self.last_pose:
+                                if (abs(self.last_pose.translation.x - object_coordinates.x) > 0.3 or \
+                                    abs(self.last_pose.translation.y - object_coordinates.y) > 0.3) and \
+                                    (abs(x1-x2) - abs(y1-y2)) < 30 and (120 < center[0] < 520):
+                                    # print('intra')
+                                    self.objects_array.append([object_coordinates, dist, center])
+                        
                     self.last_mushroom_dist = dist
 
-                # if debug:
-                #     print(text_d + f" {round(float(row[4]),2)}")
-        # print(object_list_message)
+        object_list_message = MarkerArray()
+        for obj in self.objects_array:
+            object_list_message.markers.append(self.create_marker_for_object(obj[0]))
         self.object_publisher.publish(object_list_message)
 
         return frame
@@ -285,24 +334,43 @@ class ObjectDetectionNode(Node):
 
     def calculate_coordinates_of_detected_object(self, object_center, distance):
         object_point = Point()
-        if self.last_pose:
-            # robot_angles = self.eulerFromQuat(self.last_pose.orientation)
-            robot_angles = self.eulerFromQuat(self.last_pose.rotation)
+        
+        # robot_angles = self.eulerFromQuat(self.last_pose.orientation)
+        try:
+            trans = self._tf_buffer.lookup_transform('map', 'base_link', rclpy.time.Time())
+            last_pose = trans.transform
+
+            robot_angles = self.eulerFromQuat(last_pose.rotation)
             # print(math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
             # object_point.x = self.last_pose.position.x + distance / 100 * math.cos(robot_angles[0] + math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
             # object_point.y = self.last_pose.position.y + distance / 100 * math.sin(robot_angles[0] + math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
-            object_point.x = self.last_pose.translation.x + distance / 100 * math.cos(robot_angles[0] + math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
-            object_point.y = self.last_pose.translation.y + distance / 100 * math.sin(robot_angles[0] + math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
+            
+            object_point.x = last_pose.translation.x + distance / 100 * math.cos(robot_angles[0] + math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
+            object_point.y = last_pose.translation.y + distance / 100 * math.sin(robot_angles[0] + math.atan((self.frame_width / 2 - object_center[0]) / distance / 20))
             object_point.z = 0.0
+            # print(object_point)
             return object_point
+        except Exception as e:
+            # print(e)
+            pass
+        
         return None
+        
     
 
     def tf_received(self, msg):
-        for tr in msg.transforms:
-            if tr.header.frame_id == 'odom' and tr.child_frame_id == 'base_link':
-                self.last_pose = tr.transform
-
+        # for tr in msg.transforms:
+        #     if tr.header.frame_id == 'odom' and tr.child_frame_id == 'base_link':
+        #         self.last_pose = tr.transform
+        try:
+            trans = self._tf_buffer.lookup_transform('map', 'base_link', rclpy.time.Time())
+            mesaj = TFMessage()
+            mesaj.transforms.append(trans)
+            self.pose_transform_publisher.publish(mesaj)
+            self.last_pose = trans.transform
+        except Exception as e:
+            # print(e)
+            pass
         
 
     def send_string_message(self, string_message):
@@ -336,9 +404,45 @@ class ObjectDetectionNode(Node):
 
     def change_decision_making_state(self, request, response):
         print('I was called with: ' + request.state_name)
+        if request.state_name.startswith('pick_object'):
+            print('Going to pick object', int(request.state_name[request.state_name.index(' '):]))
+            self.pick_object_index = int(request.state_name[request.state_name.index(' '):])
+            self.decision_making_state = RobotState.FINDING
+        elif request.state_name == 'release':
+            self.release_mushroom()
         response.response_data = request.state_name
         return response
 
+    def navigateToPose(self, coords):
+        goal_pose = NavigateToPose.Goal()
+        
+        goal_pose.pose.header.frame_id = 'map'
+        goal_pose.pose.pose.position.x = coords.x
+        goal_pose.pose.pose.position.y = coords.y
+        # goal_pose.pose.pose.position.z = 0.0
+        # goal_pose.pose.pose.orientation.x = 0.0
+        # goal_pose.pose.pose.orientation.y = 0.0
+        # goal_pose.pose.pose.orientation.z = 0.0
+        goal_pose.pose.pose.orientation.w = 1.0
+
+        if time.time() - self.last_navigation_command > 1000:
+            print('Sending navigation goal')
+            self.last_navigation_command = time.time()
+            # self.goal_pose_publisher.publish(goal_pose)
+            self.action_client.send_goal_async(goal_pose)
+
+    def cancelNavigation(self):
+        self.action_client.wait_for_server()
+        print('Cancelling navigation goal')
+        # Cancel the navigation goal
+        # cancel_request = self.action_client.create_goal_cancel_request()
+        # self.action_client.send_goal_cancel_request(cancel_request)
+        active_goals = self.action_client._goal_handles
+
+        # Cancel each goal handle
+        for goal_handle in active_goals:
+            self.action_client._cancel_goal_async(goal_handle)
+            
 
 def main(args=None):
     rclpy.init(args=args)
