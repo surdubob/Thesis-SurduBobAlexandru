@@ -14,9 +14,19 @@ To achieve these goals, the project includes a multitude of hardware and softwar
 [![IMAGE ALT TEXT](http://img.youtube.com/vi/MhWueG_nPtk/0.jpg)](https://www.youtube.com/watch?v=MhWueG_nPtk "Demonstration Video")
 
 ## Images:
-<p float="left">
-  <img src="https://raw.githubusercontent.com/surdubob/Thesis-SurduBobAlexandru/master/Images/robot.png" width="49%">
-  <img src="https://raw.githubusercontent.com/surdubob/Thesis-SurduBobAlexandru/master/Images/web-interface.png" width="49%">
-  <img src="https://raw.githubusercontent.com/surdubob/Thesis-SurduBobAlexandru/master/Images/qik.jpeg" width="49%">
-  <img src="https://raw.githubusercontent.com/surdubob/Thesis-SurduBobAlexandru/master/Images/modificare-wild-thumper.png" width="49%">
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/surdubob/Thesis-SurduBobAlexandru/master/Images/robot.png" width="60%">
+  <br>
+</p>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/surdubob/Thesis-SurduBobAlexandru/master/Images/web-interface.png" width="60%">
+  <br>
+</p>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/surdubob/Thesis-SurduBobAlexandru/master/Images/modificare-wild-thumper.png" width="60%">
+  <br>
+</p>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/surdubob/Thesis-SurduBobAlexandru/master/Images/qik.jpeg" height="200px">
 </p>
